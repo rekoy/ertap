@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <title>Edu Tap — tap to push, climb the leaderboard</title>
+  <meta name="description" content="Tap the video, earn credits, and race everyone on the Edu Tap leaderboard. No login needed.">
+  <meta name="theme-color" content="#101828">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bungee&family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css?v=3">
+</head>
+<body>
+  <div class="phone">
+    <!-- Join -->
+    <section id="join" class="screen join" aria-labelledby="join-title">
+      <img class="join-bg" src="/media/poster.jpg" alt="" aria-hidden="true">
+      <div class="join-card">
+        <p class="badge">No login · Free to play</p>
+        <h1 id="join-title" class="logo">EDU<span>TAP</span></h1>
+        <p class="join-sub">Every tap replays him. Tap fast and watch him go!<br><b>+1 credit</b> per tap, <b>+10</b> rep bonus every 15 taps.</p>
+        <form id="join-form" novalidate>
+          <label for="nickname">Your nickname</label>
+          <input id="nickname" name="nickname" maxlength="16" autocomplete="nickname" autocapitalize="words" placeholder="e.g. Reko" required>
+          <p id="join-error" class="error" role="alert" hidden></p>
+          <button type="submit" class="btn-primary">Start tapping</button>
+        </form>
+        <p class="join-count" id="join-count"></p>
+      </div>
+    </section>
+
+    <!-- Game -->
+    <section id="game" class="screen game" hidden aria-label="Game">
+      <header class="hud">
+        <div class="hud-player">
+          <span class="hud-name" id="hud-name"></span>
+          <span class="hud-rank" id="hud-rank">#–</span>
+        </div>
+        <div class="hud-credits" aria-live="polite">
+          <span class="hud-label">Credits</span>
+          <strong id="credits">0</strong>
+        </div>
+        <button id="sound" class="icon-btn" aria-pressed="true" aria-label="Sound on">
+          <svg viewBox="0 0 24 24" class="ico-on" aria-hidden="true"><path fill="currentColor" d="M4 9v6h4l5 4V5L8 9H4Zm12.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4Zm-2.5-8.8v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6Z"/></svg>
+          <svg viewBox="0 0 24 24" class="ico-off" aria-hidden="true"><path fill="currentColor" d="M4 9v6h4l5 4V5L8 9H4Zm16.6 3 2.1-2.1-1.4-1.4-2.1 2.1-2.1-2.1-1.4 1.4 2.1 2.1-2.1 2.1 1.4 1.4 2.1-2.1 2.1 2.1 1.4-1.4-2.1-2.1Z"/></svg>
+        </button>
+      </header>
+
+      <div class="views">
+        <div id="view-tap" class="view view-tap">
+          <button id="stage" class="stage" aria-label="Tap to earn credits">
+            <canvas id="canvas" width="480" height="640"></canvas>
+            <span id="loader" class="loader" aria-hidden="true"><i id="loader-fill"></i></span>
+            <span class="vignette" aria-hidden="true"></span>
+            <span id="hint" class="hint" aria-hidden="true">TAP TAP TAP!</span>
+            <span id="combo" class="combo" aria-hidden="true"></span>
+            <span class="rep-meter" aria-hidden="true"><i id="rep-fill"></i></span>
+          </button>
+          <div class="stats">
+            <div><span>Reps</span><strong id="reps">0</strong></div>
+            <div><span>Best combo</span><strong id="best-combo">0</strong></div>
+            <div><span>Players</span><strong id="players">–</strong></div>
+          </div>
+        </div>
+
+        <div id="view-board" class="view view-board" hidden>
+          <div class="board-head">
+            <h2>Leaderboard</h2>
+            <p id="board-meta">Live · updates every few seconds</p>
+          </div>
+          <ol id="board" class="board"></ol>
+          <div id="board-me" class="board-me" hidden></div>
+        </div>
+      </div>
+
+      <nav class="tabs" aria-label="Sections">
+        <button class="tab is-active" data-view="tap" aria-current="page">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M9 11.2V5.5a2 2 0 1 1 4 0v4.3l4.6.9a2.5 2.5 0 0 1 2 2.9l-1 5.1A3 3 0 0 1 15.7 21h-4.4a3 3 0 0 1-2.3-1.1l-3.6-4.4a1.7 1.7 0 0 1 2.5-2.3L9 14.4v-3.2Z"/></svg>
+          Tap
+        </button>
+        <button class="tab" data-view="board">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 21v-8h5v8H3Zm6.5 0V4h5v17h-5ZM16 21v-11h5v11h-5Z"/></svg>
+          Leaderboard
+        </button>
+      </nav>
+    </section>
+  </div>
+
+  <p class="desktop-note" aria-hidden="true">Made for phones · open this page on your mobile for the best taps</p>
+
+  <script src="/game.js?v=3" defer></script>
+</body>
+</html>

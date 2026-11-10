@@ -1,0 +1,1 @@
+{ "name": "Edu Tap", "short_name": "Edu Tap", "start_url": "/", "display": "standalone", "orientation": "portrait", "background_color": "#101828", "theme_color": "#101828", "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }] }
