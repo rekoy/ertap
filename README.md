@@ -27,3 +27,12 @@ Regenerate after replacing `source/pushup.mp4`:
     ffmpeg -y -i source/pushup.mp4 -vn -ac 1 -b:a 96k public/media/pushup.mp3
 
 Then update `count` in `public/media/frames/manifest.json`.
+
+## Deploy on Netlify
+
+Connect the repo in Netlify; `netlify.toml` does the rest:
+
+- Publishes `public/` (no build step)
+- `netlify/functions/api.mjs` serves `/api/*` and stores scores in Netlify Blobs (store `edutap`), no database to set up
+
+The local `server.js` (`npm start`) uses `data/db.json` instead; the two leaderboards are separate.
