@@ -188,6 +188,7 @@
     const x = clientX - rect.left;
     const y = clientY - rect.top;
     const now = performance.now();
+    if (chal) return challengeTap(now, x, y);
 
     combo = now - lastTap < COMBO_WINDOW ? combo + 1 : 1;
     lastTap = now;
@@ -199,9 +200,7 @@
 
     pendingTaps += 1;
     stage.classList.add("started");
-    playStart = now;
-    draw(0);
-    initAudio().then(playSound);
+    replay(now);
     popup(x, y, "+1");
 
     tapsTowardRep += 1;
@@ -214,6 +213,12 @@
     ripple(x, y);
     if (navigator.vibrate) navigator.vibrate(8);
     render();
+  }
+
+  function replay(now, sound = true) {
+    playStart = now;
+    draw(0);
+    if (sound) initAudio().then(playSound);
   }
 
   // Pointer events cover touch and mouse; each finger counts as one tap.
@@ -251,6 +256,7 @@
       stage.classList.remove("hot");
     }
     $("rep-fill").style.transform = `scaleX(${tapsTowardRep / TAPS_PER_REP})`;
+    if (chal) challengeFrame(now);
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
@@ -355,20 +361,400 @@
   }, 4000);
 
   // ---------- Tabs ----------
-  document.querySelectorAll(".tab").forEach((tab) => {
-    tab.addEventListener("click", () => {
-      document.querySelectorAll(".tab").forEach((t) => {
-        const active = t === tab;
-        t.classList.toggle("is-active", active);
-        if (active) t.setAttribute("aria-current", "page");
-        else t.removeAttribute("aria-current");
-      });
-      const view = tab.dataset.view;
-      $("view-tap").hidden = view !== "tap";
-      $("view-board").hidden = view !== "board";
-      if (view === "board") refreshBoard();
+  function showView(view) {
+    document.querySelectorAll(".tab").forEach((t) => {
+      const active = t.dataset.view === view;
+      t.classList.toggle("is-active", active);
+      if (active) t.setAttribute("aria-current", "page");
+      else t.removeAttribute("aria-current");
     });
+    $("view-tap").hidden = view !== "tap";
+    $("view-challenges").hidden = view !== "challenges";
+    $("view-board").hidden = view !== "board";
+    if (view === "board") refreshBoard();
+    if (view === "challenges") refreshChallenges();
+  }
+  document.querySelectorAll(".tab").forEach((tab) => tab.addEventListener("click", () => showView(tab.dataset.view)));
+
+  // ---------- Challenges ----------
+  const ICONS = { blitz: "10", beat: "♪", freeze: "■", blind: "?" };
+  const HELP = {
+    blitz: "Tap anywhere on the video. Every tap counts.",
+    beat: "Tap when the purple ring closes on the white one. Perfect = 2 pts, good = 1.",
+    freeze: "Green: tap like crazy. Red: hands off! The lights flip faster over time.",
+    blind: "Tap exactly the target, then stop. It ends 1.5 s after your last tap.",
+  };
+  const PERFECT_MS = 75;
+  const GOOD_MS = 150;
+  const RED_GRACE_MS = 180;
+  const BLIND_IDLE_MS = 1500;
+
+  const gameEl = $("game");
+  const big = $("ch-big");
+  let chOverview = null;
+  let chal = null; // the run in progress
+
+  function bigText(text, cls = "") {
+    big.className = "ch-big " + cls;
+    big.textContent = text;
+    void big.offsetWidth;
+    big.classList.add("pop");
+  }
+
+  // Short synth blips for countdowns, beats and lights.
+  function tone(freq, dur = 0.07, type = "square", vol = 0.12, at = 0) {
+    if (!soundOn || !audioCtx) return;
+    const t = at || audioCtx.currentTime;
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = type;
+    o.frequency.value = freq;
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    o.connect(g).connect(audioCtx.destination);
+    o.start(t);
+    o.stop(t + dur + 0.02);
+  }
+
+  function later(fn, ms) {
+    const c = chal;
+    c.timers.push(setTimeout(() => chal === c && fn(), ms));
+  }
+
+  function flash(kind) {
+    stage.classList.remove("flash-good", "flash-bad");
+    void stage.offsetWidth;
+    stage.classList.add("flash-" + kind);
+    const c = chal;
+    setTimeout(() => chal === c && stage.classList.remove("flash-" + kind), 120);
+  }
+
+  function setStat(text) {
+    $("ch-stat").textContent = text;
+  }
+
+  async function startChallenge(key) {
+    initAudio();
+    if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+    const r = await post("/api/challenge/start", { id: player.id, token: player.token, ch: key }).catch(() => null);
+    if (!r || !r.ok) {
+      if (r && r.status === 401) return resetPlayer();
+      $("ch-meta").textContent = "Can't reach the server. Try again.";
+      return;
+    }
+    const info = chOverview?.list.find((c) => c.key === key) || { name: key, stars: [], unit: "" };
+    chal = { key, info, run: r.data.run, target: r.data.target, beat: r.data.beat, state: "countdown", taps: 0, score: 0, perfect: 0, good: 0, timers: [] };
+
+    showView("tap");
+    gameEl.classList.add("in-challenge");
+    stage.classList.add("mode-" + key);
+    stage.classList.toggle("timed", key === "blitz" || key === "freeze");
+    $("ch-title").textContent = info.name;
+    $("ch-help").textContent = HELP[key];
+    $("ch-time-fill").style.transform = "scaleX(1)";
+    setStat(key === "blind" ? `Target ${chal.target}` : key === "beat" ? "♥♥♥  0" : "0");
+    stage.focus({ preventScroll: true });
+
+    if (key === "beat") return beatCountIn();
+    [3, 2, 1].forEach((n, i) => later(() => { bigText(String(n)); tone(660); }, i * 650));
+    later(() => { tone(1320, 0.15); go(); }, 1950);
+  }
+
+  function go() {
+    const now = performance.now();
+    chal.state = "live";
+    chal.t0 = now;
+    if (chal.key === "blitz") {
+      chal.ends = now + chal.info.seconds * 1000;
+      bigText("GO!");
+    } else if (chal.key === "freeze") {
+      chal.ends = now + chal.info.seconds * 1000;
+      setLight("green");
+    } else if (chal.key === "blind") {
+      chal.lastTap = 0;
+      bigText(`TAP ${chal.target}`, "small");
+    }
+  }
+
+  // ----- Freeze! -----
+  function setLight(color) {
+    chal.light = color;
+    chal.lightAt = performance.now();
+    stage.classList.toggle("light-green", color === "green");
+    stage.classList.toggle("light-red", color === "red");
+    bigText(color === "green" ? "PUSH!" : "FREEZE!", "small");
+    if (color === "green") tone(880, 0.12, "triangle", 0.2);
+    else {
+      tone(160, 0.35, "sawtooth", 0.14);
+      if (navigator.vibrate) navigator.vibrate(60);
+    }
+    // The lights flip faster as the run goes on, down to half the wait.
+    const speed = 1 - Math.min(0.5, (performance.now() - chal.t0) / 60000);
+    const wait = color === "green" ? 1300 + Math.random() * 2400 : 700 + Math.random() * 1500;
+    later(() => chal.state === "live" && setLight(color === "green" ? "red" : "green"), wait * speed);
+  }
+
+  // ----- Beat Drop -----
+  function bpmAt(n) {
+    const b = chal.beat;
+    return Math.min(b.maxBpm, b.startBpm + Math.floor(n / b.everyBeats) * b.stepBpm);
+  }
+
+  function beatCountIn() {
+    const iv = 60000 / chal.beat.startBpm;
+    const first = performance.now() + 500;
+    chal.lives = chal.beat.lives;
+    chal.times = [first + 4 * iv];
+    chal.resolved = [];
+    chal.cur = 0;
+    chal.scheduled = 0;
+    chal.streak = 0;
+    ["3", "2", "1", "GO!"].forEach((t, i) => later(() => { bigText(t); tone(i < 3 ? 660 : 1320); }, 500 + i * iv));
+    later(() => { chal.state = "live"; chal.t0 = performance.now(); big.textContent = ""; }, 500 + 4 * iv - GOOD_MS);
+  }
+
+  function beatStat() {
+    setStat(`${"♥".repeat(chal.lives)}${"♡".repeat(chal.beat.lives - chal.lives)}  ${chal.score}`);
+  }
+
+  function beatMiss(text) {
+    chal.lives -= 1;
+    chal.streak = 0;
+    flash("bad");
+    bigText(text, "small");
+    tone(140, 0.18, "sawtooth", 0.12);
+    if (navigator.vibrate) navigator.vibrate(40);
+    beatStat();
+    if (chal.lives <= 0) endChallenge("OUT!");
+  }
+
+  function beatFrame(now) {
+    const times = chal.times;
+    while (times[times.length - 1] < now + 1500) times.push(times[times.length - 1] + 60000 / bpmAt(times.length));
+    // Schedule metronome clicks on the audio clock so they stay tight.
+    if (audioCtx) {
+      while (times[chal.scheduled] < now + 150) {
+        const n = chal.scheduled;
+        tone(n % 4 === 0 ? 1560 : 1040, 0.05, "square", 0.1, audioCtx.currentTime + Math.max(0, times[n] - now) / 1000);
+        chal.scheduled += 1;
+      }
+    }
+    if (chal.state !== "live") return;
+    while (chal.resolved[chal.cur]) chal.cur += 1;
+    if (now > times[chal.cur] + GOOD_MS) {
+      chal.resolved[chal.cur] = true;
+      chal.cur += 1;
+      beatMiss("MISS");
+      if (!chal || chal.state !== "live") return;
+    }
+    const t = times[chal.cur];
+    const prev = chal.cur > 0 ? times[chal.cur - 1] : t - 60000 / bpmAt(0);
+    const p = Math.min(1, Math.max(0, (now - prev) / (t - prev)));
+    $("ch-ring").firstElementChild.style.transform = `scale(${2 - p})`;
+  }
+
+  function beatTap(now) {
+    const times = chal.times;
+    let k = chal.cur;
+    while (chal.resolved[k]) k += 1;
+    if (Math.abs(now - times[k + 1]) < Math.abs(now - times[k])) k += 1;
+    const dt = Math.abs(now - times[k]);
+    if (dt > GOOD_MS) return beatMiss("OFF BEAT");
+    chal.resolved[k] = true;
+    const perfect = dt <= PERFECT_MS;
+    chal.score += perfect ? 2 : 1;
+    chal[perfect ? "perfect" : "good"] += 1;
+    chal.streak += 1;
+    flash("good");
+    replay(now, false);
+    tone(perfect ? 1760 : 1320, 0.05, "triangle", 0.12);
+    bigText(perfect ? (chal.streak >= 8 ? `PERFECT x${chal.streak}` : "PERFECT") : "GOOD", "small");
+    // Call out each tempo jump.
+    if ((k + 1) % chal.beat.everyBeats === 0 && bpmAt(k + 1) > bpmAt(k)) later(() => bigText("FASTER!", "small"), 200);
+    beatStat();
+  }
+
+  // ----- Shared tap + frame hooks -----
+  function challengeTap(now, x, y) {
+    ripple(x, y);
+    if (chal.state !== "live") return;
+    if (navigator.vibrate) navigator.vibrate(8);
+
+    if (chal.key === "beat") return beatTap(now);
+
+    if (chal.key === "freeze" && chal.light === "red" && now - chal.lightAt > RED_GRACE_MS) {
+      chal.caught = true;
+      flash("bad");
+      return endChallenge("CAUGHT!");
+    }
+
+    chal.taps += 1;
+    replay(now);
+    if (chal.key === "blind") {
+      chal.lastTap = now;
+      big.textContent = "";
+      return;
+    }
+    popup(x, y, "+1");
+    setStat(fmt(chal.taps));
+  }
+
+  function challengeFrame(now) {
+    if (chal.state === "done") return;
+    if (chal.key === "beat") return beatFrame(now);
+    if (chal.state !== "live") return;
+    if (chal.ends) {
+      const left = Math.max(0, chal.ends - now);
+      $("ch-time-fill").style.transform = `scaleX(${left / (chal.info.seconds * 1000)})`;
+      if (left === 0) endChallenge(chal.key === "freeze" ? "SURVIVED!" : "TIME!");
+    } else if (chal.key === "blind" && chal.lastTap && now - chal.lastTap > BLIND_IDLE_MS) {
+      endChallenge("DONE!");
+    }
+  }
+
+  async function endChallenge(text) {
+    const c = chal;
+    if (!c || c.state === "done") return;
+    c.state = "done";
+    c.timers.forEach(clearTimeout);
+    stage.classList.remove("light-green", "light-red");
+    bigText(text, "small");
+    tone(text === "CAUGHT!" || text === "OUT!" ? 120 : 990, 0.4, "triangle", 0.15);
+    const [r] = await Promise.all([
+      post("/api/challenge/finish", { id: player.id, token: player.token, run: c.run, taps: c.taps, score: c.score }).catch(() => null),
+      new Promise((ok) => setTimeout(ok, 900)),
+    ]);
+    if (chal !== c) return;
+    showResult(c, r);
+  }
+
+  function exitChallenge() {
+    if (chal) chal.timers.forEach(clearTimeout);
+    chal = null;
+    gameEl.classList.remove("in-challenge");
+    stage.classList.remove("mode-blitz", "mode-beat", "mode-freeze", "mode-blind", "timed", "light-green", "light-red", "flash-good", "flash-bad");
+    big.textContent = "";
+    $("result").hidden = true;
+  }
+
+  const TITLES = ["Keep going!", "Nice!", "Great!", "LEGENDARY!"];
+
+  function showResult(c, r) {
+    const d = r && r.ok ? r.data : null;
+    $("res-title").textContent = d ? TITLES[d.stars] : "Couldn't save";
+    $("res-kicker").textContent = d ? (d.newBest && d.score > 0 ? "New personal best!" : d.rank ? `#${d.rank} on ${c.info.name}` : c.info.name) : c.info.name;
+    $("res-score").textContent = d ? fmt(d.score) : "–";
+    $("res-unit").textContent = c.info.unit;
+
+    let detail = "";
+    if (c.key === "blind" && d) detail = d.taps === d.target ? `Exactly ${d.target}. Unreal.` : `You tapped ${d.taps}. The target was ${d.target}.`;
+    if (c.key === "freeze") detail = c.caught ? "Caught moving on red!" : "You survived all 30 seconds!";
+    if (c.key === "beat") detail = `${c.perfect} perfect · ${c.good} good`;
+    if (c.key === "blitz" && d) detail = `${(d.score / c.info.seconds).toFixed(1)} taps per second`;
+    if (!d) detail = (r && r.data && r.data.error) || "Can't reach the server. Your run wasn't saved.";
+    $("res-detail").textContent = detail;
+
+    const stars = d ? d.stars : 0;
+    $("res-stars").setAttribute("aria-label", `${stars} of 3 stars`);
+    $("res-stars").replaceChildren(...[0, 1, 2].map((i) => {
+      const s = document.createElement("span");
+      s.textContent = "★";
+      if (i < stars) {
+        s.className = "on";
+        s.style.animationDelay = `${150 + i * 180}ms`;
+      }
+      return s;
+    }));
+
+    let reward = "";
+    if (d && d.reward) reward = `+${fmt(d.reward)} credits${d.double ? "  (2× today!)" : ""}`;
+    else if (d && stars < 3) reward = `Next star at ${fmt(c.info.stars[stars])} ${c.info.unit}`;
+    else if (d) reward = "All 3 stars already claimed today";
+    $("res-reward").textContent = reward;
+
+    $("res-top").replaceChildren(...(d ? d.top : []).map((p) => {
+      const li = document.createElement("li");
+      li.className = p.me ? "me" : "";
+      li.innerHTML = `<span class="r">${p.rank}</span><span class="n"></span><span class="s">${fmt(p.score)}</span>`;
+      li.querySelector(".n").textContent = p.name + (p.me ? " (you)" : "");
+      return li;
+    }));
+
+    if (d) {
+      serverCredits = d.credits;
+      render();
+      if (stars === 3 || (d.newBest && d.score > 0)) confetti();
+    }
+    $("result").hidden = false;
+    $("res-again").focus({ preventScroll: true });
+  }
+
+  function confetti() {
+    const box = $("confetti");
+    const colors = ["#FFD23F", "#FF5A5F", "#3DDC97", "#9B8CFF", "#F7F8FC"];
+    for (let i = 0; i < 70; i++) {
+      const p = document.createElement("i");
+      p.style.left = Math.random() * 100 + "%";
+      p.style.background = colors[i % colors.length];
+      p.style.setProperty("--dx", (Math.random() * 160 - 80).toFixed(0) + "px");
+      p.style.setProperty("--rot", (Math.random() * 900 - 450).toFixed(0) + "deg");
+      p.style.animationDuration = 1.6 + Math.random() * 1.4 + "s";
+      p.style.animationDelay = Math.random() * 0.4 + "s";
+      p.addEventListener("animationend", () => p.remove());
+      box.appendChild(p);
+    }
+  }
+
+  $("ch-quit").addEventListener("click", () => {
+    exitChallenge();
+    showView("challenges");
   });
+  $("res-again").addEventListener("click", () => {
+    const key = chal ? chal.key : null;
+    exitChallenge();
+    if (key) startChallenge(key);
+  });
+  $("res-back").addEventListener("click", () => {
+    exitChallenge();
+    showView("challenges");
+  });
+
+  function starsHtml(n) {
+    return `<span class="stars" aria-label="${n} of 3 stars today">${[0, 1, 2].map((i) => `<span class="${i < n ? "on" : ""}">★</span>`).join("")}</span>`;
+  }
+
+  async function refreshChallenges() {
+    if (!player) return;
+    try {
+      chOverview = await fetch(`/api/challenges?id=${encodeURIComponent(player.id)}`).then((r) => r.json());
+    } catch {
+      $("ch-meta").textContent = "Can't reach the server. Try again.";
+      return;
+    }
+    const o = chOverview;
+    $("ch-meta").textContent = `Each ★ pays ${o.starCredits} credits, once a day per challenge. Resets at midnight WIB.`;
+    $("ch-list").replaceChildren(...o.list.map((c) => {
+      const li = document.createElement("li");
+      const b = document.createElement("button");
+      const hot = c.key === o.featured;
+      b.type = "button";
+      b.className = "ch-card" + (hot ? " featured" : "");
+      b.innerHTML = `<span class="ch-icon ${c.key}" aria-hidden="true">${ICONS[c.key]}</span>
+        <span>
+          <span class="ch-name"><span class="nm"></span>${hot ? '<span class="ch-x2">2× TODAY</span>' : ""}</span>
+          <span class="ch-tag"></span>
+          <span class="ch-meta">${starsHtml(c.starsToday)}<span>Best <b>${c.me ? fmt(c.me.score) : "–"}</b></span><span class="rec"></span></span>
+          <span class="ch-goals">★ ${c.stars.map(fmt).join(" · ")} ${c.unit}</span>
+        </span>`;
+      b.querySelector(".nm").textContent = c.name;
+      b.querySelector(".ch-tag").textContent = c.tagline;
+      const rec = c.top[0];
+      b.querySelector(".rec").textContent = rec ? `Record: ${rec.name} (${fmt(rec.score)})` : "No record yet. Claim it!";
+      b.addEventListener("click", () => startChallenge(c.key));
+      li.appendChild(b);
+      return li;
+    }));
+  }
 
   // ---------- Boot ----------
   loadFrames();

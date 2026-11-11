@@ -2,6 +2,7 @@
 // Same endpoints and rules as server.js: /api/join, /api/tap, /api/leaderboard.
 import { getStore } from "@netlify/blobs";
 import crypto from "node:crypto";
+import challenges from "../../shared/challenges.js";
 
 const REP_BONUS = 10;
 const MAX_TAPS_PER_SEC = 15;
@@ -36,6 +37,11 @@ async function allPlayers(store) {
   return list;
 }
 
+async function authed(store, body) {
+  const p = typeof body.id === "string" && /^[0-9a-f-]{36}$/.test(body.id) ? await store.get(`players/${body.id}`, { type: "json" }) : null;
+  return p && typeof body.token === "string" && sha(body.token) === p.tokenHash ? p : null;
+}
+
 const row = (p, rank) => ({ rank, name: p.name, credits: p.credits, reps: p.reps });
 
 export async function handle(req, store) {
@@ -57,9 +63,22 @@ export async function handle(req, store) {
     return json(200, { id, token, name });
   }
 
+  if (req.method === "POST" && (route === "/api/challenge/start" || route === "/api/challenge/finish")) {
+    const p = await authed(store, body);
+    if (!p) return json(401, { error: "Unknown player." });
+    const r = route.endsWith("/start") ? challenges.start(p, body.ch, Date.now()) : challenges.finish(p, body, Date.now(), await allPlayers(store));
+    await store.setJSON(`players/${p.id}`, p);
+    boardCache.at = 0;
+    return json(r.status, r.body);
+  }
+
+  if (req.method === "GET" && route === "/api/challenges") {
+    return json(200, challenges.overview(await allPlayers(store), url.searchParams.get("id"), Date.now()));
+  }
+
   if (req.method === "POST" && route === "/api/tap") {
-    const p = typeof body.id === "string" && /^[0-9a-f-]{36}$/.test(body.id) ? await store.get(`players/${body.id}`, { type: "json" }) : null;
-    if (!p || typeof body.token !== "string" || sha(body.token) !== p.tokenHash) return json(401, { error: "Unknown player." });
+    const p = await authed(store, body);
+    if (!p) return json(401, { error: "Unknown player." });
     const now = Date.now();
     const elapsed = Math.max(0, now - p.lastSync) / 1000;
     const allowed = Math.ceil(Math.min(elapsed, MAX_IDLE_SEC) * MAX_TAPS_PER_SEC) + 5;

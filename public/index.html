@@ -12,7 +12,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Bungee&family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/style.css?v=3">
+  <link rel="stylesheet" href="/style.css?v=4">
 </head>
 <body>
   <div class="phone">
@@ -59,12 +59,32 @@
             <span id="hint" class="hint" aria-hidden="true">TAP TAP TAP!</span>
             <span id="combo" class="combo" aria-hidden="true"></span>
             <span class="rep-meter" aria-hidden="true"><i id="rep-fill"></i></span>
+            <!-- Challenge overlay -->
+            <span class="ch-top" aria-hidden="true">
+              <span id="ch-title" class="ch-title"></span>
+              <span id="ch-stat" class="ch-stat"></span>
+            </span>
+            <span class="ch-time" aria-hidden="true"><i id="ch-time-fill"></i></span>
+            <span id="ch-ring" class="ch-ring" aria-hidden="true"><i></i></span>
+            <span id="ch-big" class="ch-big" aria-live="assertive"></span>
           </button>
+          <div class="ch-panel">
+            <p id="ch-help" class="ch-help"></p>
+            <button id="ch-quit" class="ch-quit" type="button">Quit</button>
+          </div>
           <div class="stats">
             <div><span>Reps</span><strong id="reps">0</strong></div>
             <div><span>Best combo</span><strong id="best-combo">0</strong></div>
             <div><span>Players</span><strong id="players">–</strong></div>
           </div>
+        </div>
+
+        <div id="view-challenges" class="view view-challenges" hidden>
+          <div class="board-head">
+            <h2>Challenges</h2>
+            <p id="ch-meta">Earn up to 3 stars per challenge every day</p>
+          </div>
+          <ul id="ch-list" class="ch-list"></ul>
         </div>
 
         <div id="view-board" class="view view-board" hidden>
@@ -82,16 +102,38 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M9 11.2V5.5a2 2 0 1 1 4 0v4.3l4.6.9a2.5 2.5 0 0 1 2 2.9l-1 5.1A3 3 0 0 1 15.7 21h-4.4a3 3 0 0 1-2.3-1.1l-3.6-4.4a1.7 1.7 0 0 1 2.5-2.3L9 14.4v-3.2Z"/></svg>
           Tap
         </button>
+        <button class="tab" data-view="challenges">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="m12 2.5 2.9 5.9 6.5.9-4.7 4.6 1.1 6.5L12 17.3l-5.8 3.1 1.1-6.5-4.7-4.6 6.5-.9L12 2.5Z"/></svg>
+          Challenges
+        </button>
         <button class="tab" data-view="board">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 21v-8h5v8H3Zm6.5 0V4h5v17h-5ZM16 21v-11h5v11h-5Z"/></svg>
           Leaderboard
         </button>
       </nav>
     </section>
+
+    <!-- Challenge result -->
+    <section id="result" class="result" hidden role="dialog" aria-modal="true" aria-labelledby="res-title">
+      <div class="sheet">
+        <p id="res-kicker" class="res-kicker"></p>
+        <h2 id="res-title" class="res-title"></h2>
+        <p class="res-score"><strong id="res-score"></strong> <span id="res-unit"></span></p>
+        <p id="res-detail" class="res-detail"></p>
+        <div id="res-stars" class="res-stars" aria-label=""></div>
+        <p id="res-reward" class="res-reward"></p>
+        <ol id="res-top" class="res-top"></ol>
+        <div class="res-actions">
+          <button id="res-again" class="btn-primary" type="button">Again</button>
+          <button id="res-back" class="btn-ghost" type="button">All challenges</button>
+        </div>
+      </div>
+    </section>
+    <div id="confetti" class="confetti" aria-hidden="true"></div>
   </div>
 
   <p class="desktop-note" aria-hidden="true">Made for phones · open this page on your mobile for the best taps</p>
 
-  <script src="/game.js?v=3" defer></script>
+  <script src="/game.js?v=4" defer></script>
 </body>
 </html>

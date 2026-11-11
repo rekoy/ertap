@@ -3,6 +3,7 @@ const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
+const challenges = require("./shared/challenges");
 
 const PORT = Number(process.env.PORT) || 3100;
 const PUBLIC = path.join(__dirname, "public");
@@ -121,6 +122,20 @@ async function api(req, res, url) {
     p.lastSync = now;
     save();
     return json(res, 200, { credits: p.credits, reps: p.reps, accepted: taps });
+  }
+
+  if (req.method === "POST" && (url.pathname === "/api/challenge/start" || url.pathname === "/api/challenge/finish")) {
+    const body = await readBody(req);
+    const p = auth(body);
+    if (!p) return json(res, 401, { error: "Unknown player." });
+    p.id = body.id;
+    const r = url.pathname.endsWith("/start") ? challenges.start(p, body.ch, Date.now()) : challenges.finish(p, body, Date.now(), ranked());
+    save();
+    return json(res, r.status, r.body);
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/challenges") {
+    return json(res, 200, challenges.overview(ranked(), url.searchParams.get("id"), Date.now()));
   }
 
   if (req.method === "GET" && url.pathname === "/api/leaderboard") {
